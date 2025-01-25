@@ -1,6 +1,6 @@
 {
   "name": "@dao3fun/storage-rocket",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "This npm package is designed to optimize database performance, improve resource utilization, and speed up data retrieval. It assists developers in achieving more efficient data processing within database read/write limits.",
   "main": "server/dist/server/src/App.js",
   "scripts": {
@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Qck320923/Dao3-StorageRocket"
+    "url": "https://github.com/Qck320923/StorageRocket"
   },
   "author": "L.W.Kevin0wvf",
   "license": "MIT",

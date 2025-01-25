@@ -48,9 +48,9 @@ list.getCurrentPage().forEach((value) => {
 
 ## 贡献 Contribution
 
-我们欢迎任何形式的贡献！如果你发现了bug，或者有任何改进建议，欢迎在[GitHub仓库](https://github.com/Qck320923/Dao3-StorageRocket)上提交issue或pull request。
+我们欢迎任何形式的贡献！如果你发现了bug，或者有任何改进建议，欢迎在[GitHub仓库](https://github.com/Qck320923/StorageRocket)上提交issue或pull request。
 
-We welcome contributions in any form! If you find any bugs or have suggestions for improvement, please feel free to submit an issue or pull request on [the GitHub repository](https://github.com/Qck320923/Dao3-StorageRocket).
+We welcome contributions in any form! If you find any bugs or have suggestions for improvement, please feel free to submit an issue or pull request on [the GitHub repository](https://github.com/Qck320923/StorageRocket).
 
 ## 许可证 License
 
