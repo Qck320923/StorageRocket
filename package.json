@@ -1,0 +1,27 @@
+{
+  "name": "storage-rocket",
+  "version": "1.0.0",
+  "description": "[标题]是一个[描述包的用途、功能或解决的问题]的npm包。它提供了[列出主要特性或功能]，旨在帮助开发者[解决特定问题、提高生产效率或实现某种功能]。",
+  "main": "server/dist/server/src/App.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Qck320923/Dao3-StorageRocket"
+  },
+  "author": "L.W.Kevin0wvf",
+  "license": "MIT",
+  "files": [
+    "server/dist/server/src"
+  ],
+  "types": "server/dist/server/src/App.d.ts",
+  "devDependencies": {
+    "acorn": "^8.14.0",
+    "terser-webpack-plugin": "^5.3.11",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.7.3",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^6.0.1"
+  }
+}

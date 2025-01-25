@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "strict": true, // 启用严格类型检查模式，有助于发现潜在的类型错误。
+    "removeComments": false, // 在编译过程中移除所有注释，减少生成代码的体积。
+    "declaration": true, // 自动生成声明文件
+    "declarationDir": "dist", // 声明文件生成的目录
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "experimentalDecorators": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "rootDir": "../",
+    "outDir": "dist", // ！！不要更改此项 ！！
+    "typeRoots": ["./types"],
+    "lib": ["ES2015"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shares/*": ["../shares/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}
