@@ -15,7 +15,7 @@ Storage Rocket is an npm package designed to optimize database performance. It o
 In your JavaScript or TypeScript file, import storage-rocket using the `import` statement:
 
 ```javascript
-import * as StorageRocket from "storage-rocket";
+import * as StorageRocket from "@dao3fun/storage-rocket";
 ```
 
 ### 基本用法 Basic Usage

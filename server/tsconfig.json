@@ -16,7 +16,7 @@
     "rootDir": "../",
     "outDir": "dist", // ！！不要更改此项 ！！
     "typeRoots": ["./types"],
-    "lib": [],
+    "lib": ["ESNext"],
     "paths": {
       "@/*": ["./src/*"],
       "@shares/*": ["../shares/*"]
