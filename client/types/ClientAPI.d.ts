@@ -1189,3 +1189,10 @@ declare function setInterval(callback: Function, delayMs: number): number;
  * @param id - 要清除的计时器的ID。
  */
 declare function clearInterval(id: number): void;
+
+/**
+ * 子窗口向父窗口通信
+ * 仅在 Webview 中 callback 生效
+ */
+declare function call(key, value, callback?) : any; 
+declare function callAsync(key, value) : Promise<any>; 

@@ -54,11 +54,23 @@ export class UploadGroup {
     }
 }
 
+export type Task<T = ReturnValue<JSONValue> | number | void> = {
+    resolve: (value: T) => void,
+    reject: (reason?: any) => void,
+    remainingAttempts: number,
+    callbackfn: () => Promise<T>
+};
+
 export class StorageRocket {
     public storage: GameDataStorage<JSONValue>;
     private _cache: Map<string, CacheEntry> = new Map();
     public cleanupInterval: number = 30000;
     public expiryDuration: number = 60000;
+    public uploadTasks: Map<string, {
+        curExecTimeout: number,
+        tasks: Task[]
+    }> = new Map();
+    private restricted: boolean = false;
     public readonly key: string;
 
     constructor(storage: GameDataStorage<JSONValue>, options?: StorageRocketOptions) {
@@ -148,30 +160,80 @@ export class StorageRocket {
 
     public increment(key: string, value?: number, options?: StorageRocketUploadOptions): Promise<number> {
         return new Promise((resolve) => {
-            const data = this._cache.get(key)?.data ?? 0;
-            if (typeof data == "number") this._cache.set(key, { sync: false, data: data + (value ?? 1), lastAccessed: Date.now() });
+            let data = this._cache.get(key)?.data ?? 0;
+            if (typeof data == "number") data += (value ?? 1);
             else throw new Error("{\"status\":\"SERVER_FETCH_ERROR\",\"code\":500,\"msg\":\"当前key已存储的value非数字类型，不可递增\"}");
-            this.upload(key, () => this.storage.increment(key, value), options).then((val) => resolve(val));
+            this._cache.set(key, { sync: false, data, lastAccessed: Date.now() });
+            if (options?.upload != false) this.upload(key, () => this.storage.increment(key, value), options).then((val) => resolve(val));
+            else resolve();
         });
     }
 
-    private async upload<T>(key: string, callbackfn: () => Promise<T>, options?: StorageRocketUploadOptions): Promise<T> {
-        let attempts = 0;
-        while (attempts < (options?.maxAttempts ?? 15)) {
-            try {
-                const ret = await callbackfn();
-                // @ts-ignore
-                if (this._cache.has(key)) this._cache.get(key).sync = true;
-                return ret;
-            } catch (e) {
-                // @ts-ignore
-                if (LimitErrors.includes(e.toString())) console.log(`Data updates are limited by data storage write-action restrictions`);
-                else throw e;
-                attempts++;
-                await sleep(10000);
-            }
+    private execUploadTask(key: string): void {
+        const uploadEntry = this.uploadTasks.get(key);
+        if (!uploadEntry) return;
+        if (uploadEntry.tasks.length == 0) {
+            this.uploadTasks.delete(key);
+            return;
         }
-        throw new Error("Failed to set data from data storage");
+        const remindOthers = () => {
+            this.restricted = false;
+            this.uploadTasks.forEach((v, k) => {
+                if (k == key) return;
+                clearTimeout(v.curExecTimeout);
+                v.curExecTimeout = setTimeout(() => this.execUploadTask(k), 0);
+            });
+        };
+        const task = uploadEntry.tasks.at(-1)!;
+        task.callbackfn().then((ret) => {
+            // @ts-ignore
+            if (this._cache.has(key)) this._cache.get(key).sync = true;
+            uploadEntry.tasks.forEach((t) => t.resolve(ret));
+            this.uploadTasks.delete(key);
+            if (this.restricted) remindOthers();
+        }).catch((reason: Error) => {
+            // @ts-ignore
+            if (LimitErrors.includes(reason.toString())) {
+                console.log(`Data updates are limited by data storage write-action restrictions`);
+                if (--task.remainingAttempts == 0) {
+                    task.reject(new Error("Failed to upload data to data storage"));
+                    uploadEntry.tasks.pop();
+                    if (uploadEntry.tasks.length == 0) this.uploadTasks.delete(key);
+                    else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, 10000);
+                }
+            } else {
+                task.reject(reason);
+                uploadEntry.tasks.pop();
+                if (uploadEntry.tasks.length == 0) this.uploadTasks.delete(key);
+                else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, 10000);
+                if (this.restricted) remindOthers();
+            }
+        });
+    }
+    private upload<T = ReturnValue<JSONValue> | number | void>(key: string, callbackfn: () => Promise<T>, options?: StorageRocketUploadOptions): Promise<T> {
+        return new Promise(async (resolve, reject) => {
+            const uploadEntry = this.uploadTasks.get(key);
+            if (uploadEntry) {
+                uploadEntry.tasks.push({
+                    resolve,
+                    reject,
+                    callbackfn,
+                    remainingAttempts: options?.maxAttempts ?? 15
+                } as Task);
+                clearTimeout(uploadEntry.curExecTimeout);
+                uploadEntry.curExecTimeout = setTimeout(() => this.execUploadTask(key), 0);
+            } else {
+                this.uploadTasks.set(key, {
+                    curExecTimeout: setTimeout(() => this.execUploadTask(key), 0),
+                    tasks: [{
+                        resolve,
+                        reject,
+                        callbackfn,
+                        remainingAttempts: options?.maxAttempts ?? 15
+                    } as Task]
+                });
+            }
+        });
     }
 
     public destroy(): Promise<void> {
