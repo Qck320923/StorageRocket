@@ -54,7 +54,14 @@ export class UploadGroup {
     }
 }
 
-export type Task<T = ReturnValue<JSONValue> | number | void> = {
+type ReadTask = {
+    resolve: (value: JSONValue | undefined | QueryList<JSONValue>) => void,
+    reject: (reason?: any) => void,
+    remainingAttempts: number,
+    options?: ListPageOptions
+};
+
+type UploadTask<T = ReturnValue<JSONValue> | number | void> = {
     resolve: (value: T) => void,
     reject: (reason?: any) => void,
     remainingAttempts: number,
@@ -64,13 +71,18 @@ export type Task<T = ReturnValue<JSONValue> | number | void> = {
 export class StorageRocket {
     public storage: GameDataStorage<JSONValue>;
     private _cache: Map<string, CacheEntry> = new Map();
+    private readTasks: Map<string | undefined, {
+        curExecTimeout: number,
+        tasks: ReadTask[]
+    }> = new Map();
+    private uploadTasks: Map<string, {
+        curExecTimeout: number,
+        tasks: UploadTask[]
+    }> = new Map();
+    private r_restrictedTime: number = 0;
+    private w_restrictedTime: number = 0;
     public cleanupInterval: number = 30000;
     public expiryDuration: number = 60000;
-    public uploadTasks: Map<string, {
-        curExecTimeout: number,
-        tasks: Task[]
-    }> = new Map();
-    private restricted: boolean = false;
     public readonly key: string;
 
     constructor(storage: GameDataStorage<JSONValue>, options?: StorageRocketOptions) {
@@ -87,6 +99,14 @@ export class StorageRocket {
             if (now - cacheEntry.lastAccessed > this.expiryDuration && cacheEntry.sync) this._cache.delete(key);
     }
 
+    private get readInterval(): number {
+        return Math.min(60000 - ((Date.now() - this.r_restrictedTime) % 60000), 45000);
+    }
+
+    private get uploadInterval(): number {
+        return Math.min(60000 - ((Date.now() - this.w_restrictedTime) % 60000), 45000);
+    }
+
     /**
      * 获取**数据的value**
      * @param key 
@@ -99,29 +119,82 @@ export class StorageRocket {
             if (cacheEntry) {
                 cacheEntry.lastAccessed = Date.now();
                 resolve(cacheEntry.data);
-            } else {
-                let attempts = 0;
-                while (attempts < (maxAttempts ?? 15)) {
-                    try {
-                        const data = await this.storage.get(key);
-                        this._cache.set(key, { sync: true, data: data?.value, lastAccessed: Date.now() });
-                        resolve(data?.value);
-                        return;
-                    } catch (e) {
-                        // @ts-ignore
-                        if (LimitErrors.includes(e.toString())) console.log(`Data updates are limited by data storage read-action restrictions`);
-                        else throw e;
-                        attempts++;
-                        await sleep(10000);
-                    };
-                }
-                throw new Error("Failed to get data from data storage");
-            }
+            } else this.read(key, maxAttempts).then((val) => resolve(val as JSONValue));
         });
     }
 
-    public list(options: ListPageOptions): Promise<QueryList<JSONValue>> {
-        return this.storage.list(options);
+    public list(options: ListPageOptions, maxAttempts?: number): Promise<QueryList<JSONValue>> {
+        return new Promise(async (resolve) => {
+            this.read(undefined, maxAttempts, options).then((val) => resolve(val as QueryList<JSONValue>));
+        });
+    }
+
+    private execReadTask(key: string | undefined): void {
+        const readEntry = this.readTasks.get(key);
+        if (!readEntry) return;
+        if (readEntry.tasks.length == 0) {
+            this.readTasks.delete(key);
+            return;
+        }
+        const remindOthers = () => {
+            this.r_restrictedTime = 0;
+            this.readTasks.forEach((v, k) => {
+                if (k == key) return;
+                clearTimeout(v.curExecTimeout);
+                v.curExecTimeout = setTimeout(() => this.execReadTask(k), 0);
+            });
+        };
+        const task = readEntry.tasks.at(-1)!;
+        ((key == undefined ? this.storage.list(task.options!) : this.storage.get(key)) as Promise<QueryList<JSONValue> | ReturnValue<JSONValue>>).then((data) => {
+            // @ts-ignore
+            if (key != undefined) this._cache.set(key, { sync: true, data: data?.value, lastAccessed: Date.now() });
+            // @ts-ignore
+            readEntry.tasks.forEach((t) => t.resolve(key == undefined ? data : data?.value));
+            this.readTasks.delete(key);
+            if (this.r_restrictedTime) remindOthers();
+        }).catch((reason: Error) => {
+            if (LimitErrors.includes(reason.toString())) {
+                console.log(`Data reading are limited by data storage read-action restrictions`);
+                if (!this.r_restrictedTime) this.r_restrictedTime = Date.now();
+                if (--task.remainingAttempts == 0) {
+                    task.reject(new Error("Failed to read data from data storage"));
+                    readEntry.tasks.pop();
+                    if (readEntry.tasks.length == 0) this.readTasks.delete(key);
+                }
+            } else {
+                task.reject(reason);
+                readEntry.tasks.pop();
+                if (readEntry.tasks.length == 0) this.readTasks.delete(key);
+                if (this.r_restrictedTime) remindOthers();
+            }
+            if (this.readTasks.has(key)) readEntry.curExecTimeout = setTimeout(this.execReadTask, this.readInterval);
+        });
+    }
+
+    private read<T = JSONValue | undefined | QueryList<JSONValue>>(key?: string, maxAttempts?: number, options?: ListPageOptions): Promise<T> {
+        return new Promise(async (resolve, reject) => {
+            const readEntry = this.readTasks.get(key);
+            if (readEntry) {
+                readEntry.tasks.push({
+                    resolve,
+                    reject,
+                    remainingAttempts: maxAttempts ?? 15,
+                    options
+                } as ReadTask);
+                clearTimeout(readEntry.curExecTimeout);
+                readEntry.curExecTimeout = setTimeout(() => this.execReadTask(key), 0);
+            } else {
+                this.readTasks.set(key, {
+                    curExecTimeout: setTimeout(() => this.execReadTask(key), 0),
+                    tasks: [{
+                        resolve,
+                        reject,
+                        remainingAttempts: maxAttempts ?? 15,
+                        options
+                    } as ReadTask]
+                });
+            }
+        });
     }
 
     public set(key: string, value: JSONValue, options?: StorageRocketUploadOptions): Promise<void> {
@@ -177,7 +250,7 @@ export class StorageRocket {
             return;
         }
         const remindOthers = () => {
-            this.restricted = false;
+            this.w_restrictedTime = 0;
             this.uploadTasks.forEach((v, k) => {
                 if (k == key) return;
                 clearTimeout(v.curExecTimeout);
@@ -190,26 +263,27 @@ export class StorageRocket {
             if (this._cache.has(key)) this._cache.get(key).sync = true;
             uploadEntry.tasks.forEach((t) => t.resolve(ret));
             this.uploadTasks.delete(key);
-            if (this.restricted) remindOthers();
+            if (this.w_restrictedTime) remindOthers();
         }).catch((reason: Error) => {
-            // @ts-ignore
             if (LimitErrors.includes(reason.toString())) {
                 console.log(`Data updates are limited by data storage write-action restrictions`);
+                if (!this.w_restrictedTime) this.w_restrictedTime = Date.now();
                 if (--task.remainingAttempts == 0) {
                     task.reject(new Error("Failed to upload data to data storage"));
                     uploadEntry.tasks.pop();
                     if (uploadEntry.tasks.length == 0) this.uploadTasks.delete(key);
-                    else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, 10000);
+                    else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, this.uploadInterval);
                 }
             } else {
                 task.reject(reason);
                 uploadEntry.tasks.pop();
                 if (uploadEntry.tasks.length == 0) this.uploadTasks.delete(key);
-                else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, 10000);
-                if (this.restricted) remindOthers();
+                else uploadEntry.curExecTimeout = setTimeout(this.execUploadTask, this.uploadInterval);
+                if (this.w_restrictedTime) remindOthers();
             }
         });
     }
+
     private upload<T = ReturnValue<JSONValue> | number | void>(key: string, callbackfn: () => Promise<T>, options?: StorageRocketUploadOptions): Promise<T> {
         return new Promise(async (resolve, reject) => {
             const uploadEntry = this.uploadTasks.get(key);
@@ -219,7 +293,7 @@ export class StorageRocket {
                     reject,
                     callbackfn,
                     remainingAttempts: options?.maxAttempts ?? 15
-                } as Task);
+                } as UploadTask);
                 clearTimeout(uploadEntry.curExecTimeout);
                 uploadEntry.curExecTimeout = setTimeout(() => this.execUploadTask(key), 0);
             } else {
@@ -230,7 +304,7 @@ export class StorageRocket {
                         reject,
                         callbackfn,
                         remainingAttempts: options?.maxAttempts ?? 15
-                    } as Task]
+                    } as UploadTask]
                 });
             }
         });
